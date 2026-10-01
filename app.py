@@ -14,6 +14,7 @@ FEATURE_NAMES = [
 ]
 CLASS_LABELS = {"Low": "정상", "Moderate": "주의", "High": "지연 위험"}
 COLORS = {"Low": "#2E8B57", "Moderate": "#F39C12", "High": "#D64541"}
+STATUS_COLORS = {"Low": "green", "Moderate": "orange", "High": "red"}
 SAMPLES = {
     "직접 입력": (40, 43, 98, 0, 1, 0, 0, 0),
     "정상 샘플": (40, 43, 98, 0, 1, 0, 0, 0),
@@ -50,9 +51,14 @@ def risk_factors(values: dict[str, float]) -> list[str]:
 
 
 st.set_page_config(page_title="BuildDelay AI", page_icon="🏗️", layout="wide")
-st.title("BuildDelay AI")
-st.subheader("건축공사 일정 지연 위험도 분류기")
-st.caption("교육용 가상 데이터와 Random Forest 모델을 사용합니다.")
+with st.container(border=True):
+    st.title("BuildDelay AI")
+    st.subheader("건축공사 일정 지연 위험도 분류기")
+    st.caption("교육용 가상 데이터 기반 공정관리 위험도 분석 대시보드")
+    badge_columns = st.columns(3)
+    badge_columns[0].badge("Random Forest", color="blue")
+    badge_columns[1].badge("Synthetic Dataset 600", color="gray")
+    badge_columns[2].badge("3 Risk Classes", color="green")
 
 try:
     artifact = load_artifact()
@@ -63,20 +69,22 @@ except Exception as error:
     st.error(f"모델을 불러오지 못했습니다: {error}")
     st.stop()
 
-sample_name = st.selectbox("샘플 현장", list(SAMPLES))
+st.markdown("#### 빠른 샘플 선택")
+sample_name = st.radio("샘플 현장", list(SAMPLES), horizontal=True, label_visibility="collapsed")
 defaults = SAMPLES[sample_name]
 left, right = st.columns(2)
 
 with left:
     st.markdown("### 현장 데이터 입력")
-    schedule = st.number_input("전체 공사 일정 경과율 (%)", 0.0, 100.0, float(defaults[0]))
-    actual = st.number_input("실제 공정률 (%)", 0.0, 100.0, float(defaults[1]))
-    manpower = st.number_input("인력 충족률 (%)", 0.0, 100.0, float(defaults[2]))
-    material = st.number_input("자재 납품 지연일", 0, 365, int(defaults[3]))
-    weather = st.number_input("악천후 작업 중단일", 0, 365, int(defaults[4]))
-    changes = st.number_input("설계변경 횟수", 0, 100, int(defaults[5]))
-    quality = st.number_input("품질검사 지적 건수", 0, 100, int(defaults[6]))
-    subcontractor = st.selectbox("협력업체 지연 발생 여부", ["없음", "있음"], index=int(defaults[7]))
+    st.caption("현재 현장 조건을 입력하면 공정 편차와 위험도를 함께 확인합니다.")
+    schedule = st.number_input("전체 공사 일정 경과율 (%)", 0.0, 100.0, float(defaults[0]), help="전체 계획 일정 중 현재까지 경과한 비율입니다.")
+    actual = st.number_input("실제 공정률 (%)", 0.0, 100.0, float(defaults[1]), help="실제로 완료된 공사의 비율입니다.")
+    manpower = st.number_input("인력 충족률 (%)", 0.0, 100.0, float(defaults[2]), help="계획 인력 대비 실제 확보 인력의 비율입니다.")
+    material = st.number_input("자재 납품 지연일 (일)", 0, 365, int(defaults[3]), help="주요 자재가 계획보다 늦어진 일수입니다.")
+    weather = st.number_input("악천후 작업 중단일 (일)", 0, 365, int(defaults[4]), help="악천후로 작업을 중단한 일수입니다.")
+    changes = st.number_input("설계변경 횟수 (회)", 0, 100, int(defaults[5]), help="공사 중 발생한 설계변경 횟수입니다.")
+    quality = st.number_input("품질검사 지적 건수 (건)", 0, 100, int(defaults[6]), help="품질검사에서 발생한 지적 건수입니다.")
+    subcontractor = st.selectbox("협력업체 지연 발생 여부", ["없음", "있음"], index=int(defaults[7]), help="협력업체 사유의 지연이 발생했는지 선택합니다.")
     analyze = st.button("분석 실행", type="primary")
 
 deviation = actual - schedule
@@ -84,16 +92,30 @@ values = dict(zip(FEATURE_NAMES, [schedule, actual, manpower, material, weather,
 
 with right:
     st.markdown("### 분석 결과")
-    st.metric("공정 편차", f"{deviation:.1f}%p")
+    deviation_text = "계획보다 앞섬" if deviation > 0 else "계획과 일치" if deviation == 0 else "계획보다 뒤처짐"
+    with st.container(border=True):
+        st.metric("공정 편차", f"{deviation:.1f}%p")
+        st.caption(deviation_text)
     if analyze:
         input_frame = pd.DataFrame([values], columns=artifact["feature_names"])
         probabilities = artifact["model"].predict_proba(input_frame)[0]
         probability_map = dict(zip(artifact["class_names"], probabilities))
         predicted = max(probability_map, key=probability_map.get)
-        st.markdown(f"## :{ {'Low': 'green', 'Moderate': 'orange', 'High': 'red'}[predicted] }[예측 등급: {predicted} / {CLASS_LABELS[predicted]}]")
-        st.metric("모델 Confidence", f"{probability_map[predicted] * 100:.1f}%")
-        st.caption("Confidence는 모델이 각 클래스에 배정한 상대적 예측 확률이며 실제 지연 발생 확률이 아닙니다.")
+        with st.container(border=True):
+            st.caption("모델 예측 결과")
+            st.markdown(f"## :{STATUS_COLORS[predicted]}[{predicted.upper()}]")
+            st.markdown(f"**{CLASS_LABELS[predicted]}**")
+            st.metric("Model Confidence", f"{probability_map[predicted] * 100:.1f}%")
+            st.caption("Confidence는 `predict_proba()` 기반 상대적 예측 확률이며 실제 지연 발생 확률이 아닙니다.")
 
+        st.markdown("#### 현장 KPI 요약")
+        kpi_columns = st.columns(2)
+        kpi_columns[0].metric("인력 충족률", f"{manpower:.0f}%")
+        kpi_columns[1].metric("자재 지연", f"{material}일")
+        kpi_columns[0].metric("악천후 중단", f"{weather}일")
+        kpi_columns[1].metric("협력업체 지연", subcontractor)
+
+        st.markdown("#### 클래스별 예측 확률")
         probability_data = pd.DataFrame({
             "등급": ["Low", "Moderate", "High"],
             "설명": [CLASS_LABELS[name] for name in ["Low", "Moderate", "High"]],
@@ -105,11 +127,22 @@ with right:
         chart.update_layout(showlegend=False, yaxis_title="예측 확률 (%)")
         st.plotly_chart(chart, width="stretch")
 
-        st.markdown("#### 주요 위험요인 (규칙 기반)")
-        for factor in risk_factors(values):
-            st.write(f"- {factor}")
+        with st.container(border=True):
+            st.markdown("#### 주요 위험요인 (규칙 기반)")
+            for factor in risk_factors(values):
+                st.write(f"- {factor}")
     else:
         st.info("입력값을 확인한 뒤 분석 실행 버튼을 누르세요.")
+
+with st.expander("이 모델은 어떻게 판단하나요?"):
+    st.markdown(
+        f"- 약 600개 교육용 가상 데이터 사용\n"
+        f"- 8개 현장 변수와 공정 편차를 함께 사용\n"
+        f"- Random Forest 분류, 학습 80% / 테스트 20%\n"
+        f"- Low / Moderate / High 세 등급 분류\n"
+        f"- 실제 테스트 성능: Accuracy {artifact['metrics']['accuracy']:.3f}, Macro F1 {artifact['metrics']['macro_f1']:.3f}\n"
+        f"- Confidence는 `predict_proba()` 기반 모델 출력"
+    )
 
 st.divider()
 st.warning("본 결과는 건축공학 AI 수업을 위해 생성한 가상 데이터 기반의 교육용 분석 결과이며, 실제 건설현장의 공정관리 또는 의사결정을 대체하지 않습니다.")
